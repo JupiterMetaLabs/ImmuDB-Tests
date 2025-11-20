@@ -1,12 +1,12 @@
 package Config
 
 const (
-	ImmuDBHost = "localhost"
-	ImmuDBPort = 3322
-	ImmuDBUser = "immudb"
+	ImmuDBHost     = "localhost"
+	ImmuDBPort     = 3322
+	ImmuDBUser     = "immudb"
 	ImmuDBPassword = "immudb"
 	ImmuDBDatabase = "historydb"
-	ImmuDBTable = "historytable"
+	ImmuDBTable    = "historytable"
 )
 
 type Transfer struct {
@@ -15,4 +15,5 @@ type Transfer struct {
 	BlockNumber     int    `json:"blockNumber"`
 	TransactionHash string `json:"transactionHash"`
 	Timestamp       int64  `json:"timestamp"`
+	TxIndex         int    `json:"txIndex"`
 }

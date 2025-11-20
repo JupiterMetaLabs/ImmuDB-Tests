@@ -38,11 +38,12 @@ func (t *TableOps) CreateTable(ctx context.Context, tableName string) error {
 	createTableSQL := fmt.Sprintf(`
     CREATE TABLE IF NOT EXISTS %s (
         id INTEGER AUTO_INCREMENT,
-        "from" VARCHAR[256],
-        "to" VARCHAR[256],
-        blockNumber INTEGER,
-        transactionHash VARCHAR[66],
-        ts TIMESTAMP,
+        "from" VARCHAR[42] NOT NULL,
+        "to" VARCHAR[42],
+		txIndex INTEGER NOT NULL,
+        blockNumber INTEGER NOT NULL,
+        transactionHash VARCHAR[66] NOT NULL,
+        ts TIMESTAMP NOT NULL,
         PRIMARY KEY (id)
     )
 	`, tableName)
@@ -53,15 +54,24 @@ func (t *TableOps) CreateTable(ctx context.Context, tableName string) error {
 		return err
 	}
 
-	// Create index on transactionHash for faster lookups
-	// Note: ImmutableDB index syntax may differ - using standard SQL syntax
-	createIndexSQL := fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_txhash ON %s(transactionHash)", tableName)
+	// Create index on transactionHash
+	createIndexSQL := fmt.Sprintf(
+		"CREATE INDEX IF NOT EXISTS idx_txhash ON %s(transactionHash)",
+		tableName,
+	)
 	_, err = t.DB.ExecContext(ctx, createIndexSQL)
 	if err != nil {
-		// Index might not be supported or already exist, log but don't fail
-		fmt.Printf("Note: Could not create index (may not be supported or already exist): %v\n", err)
-	} else {
-		fmt.Println("✓ Index created successfully")
+		return err
+	}
+
+	//create index on from
+	createIndexSQL = fmt.Sprintf(
+		"CREATE INDEX IF NOT EXISTS idx_from ON %s(\"from\")",
+		tableName,
+	)
+	_, err = t.DB.ExecContext(ctx, createIndexSQL)
+	if err != nil {
+		return err
 	}
 
 	fmt.Println("✓ Table created successfully")
@@ -72,23 +82,50 @@ func (t *TableOps) CreateTable(ctx context.Context, tableName string) error {
 // InsertRecord inserts a transfer record using ImmutableDB SQL
 func (t *TableOps) InsertRecord(ctx context.Context, record Config.Transfer) error {
 	insertRecordSQL := fmt.Sprintf(
-		"INSERT INTO %s (\"from\", \"to\", blockNumber, transactionHash, ts) VALUES (?, ?, ?, ?, NOW())",
+		"INSERT INTO %s (\"from\", \"to\", txIndex, blockNumber, transactionHash, ts) VALUES (?, ?, ?, ?, ?, NOW())",
 		Config.ImmuDBTable,
 	)
 	_, err := t.DB.ExecContext(ctx, insertRecordSQL, record.From, record.To, record.BlockNumber, record.TransactionHash)
 	return err
 }
 
-// InsertRecords inserts multiple transfer records in a single batch operation using ImmutableDB SQL
-// This is more efficient than inserting records one by one
+// InsertRecords inserts multiple transfer records in batches using ImmutableDB SQL
+// Splits large batches into smaller chunks to avoid transaction limits
 func (t *TableOps) InsertRecords(ctx context.Context, records []Config.Transfer) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	// ImmutableDB has a limit on entries per transaction, so we batch in chunks
+	// Using 1000 records per batch as a safe limit
+	batchSize := 1000
+	totalRecords := len(records)
+
+	for i := 0; i < totalRecords; i += batchSize {
+		end := i + batchSize
+		if end > totalRecords {
+			end = totalRecords
+		}
+
+		batch := records[i:end]
+		err := t.insertBatch(ctx, batch)
+		if err != nil {
+			return fmt.Errorf("failed to insert batch %d-%d: %w", i, end-1, err)
+		}
+	}
+
+	return nil
+}
+
+// insertBatch inserts a single batch of records
+func (t *TableOps) insertBatch(ctx context.Context, records []Config.Transfer) error {
 	if len(records) == 0 {
 		return nil
 	}
 
 	// Build batch INSERT statement with multiple VALUES clauses
 	insertRecordsSQL := fmt.Sprintf(
-		"INSERT INTO %s (\"from\", \"to\", blockNumber, transactionHash, ts) VALUES ",
+		"INSERT INTO %s (\"from\", \"to\", txIndex, blockNumber, transactionHash, ts) VALUES ",
 		Config.ImmuDBTable,
 	)
 
@@ -107,16 +144,17 @@ func (t *TableOps) InsertRecords(ctx context.Context, records []Config.Transfer)
 	// Execute batch insert
 	_, err := t.DB.ExecContext(ctx, insertRecordsSQL, args...)
 	if err != nil {
-		return fmt.Errorf("failed to insert records: %w", err)
+		return fmt.Errorf("failed to insert batch: %w", err)
 	}
 
 	return nil
 }
 
 // QueryRecord retrieves a transfer record by transactionHash using ImmutableDB SQL
+// The index on transactionHash will be used automatically by the database
 func (t *TableOps) QueryRecord(ctx context.Context, transactionHash string) (*Config.Transfer, error) {
 	queryRecordSQL := fmt.Sprintf(
-		"SELECT \"from\", \"to\", blockNumber, transactionHash, ts FROM %s WHERE transactionHash = ?",
+		"SELECT \"from\", \"to\", txIndex, blockNumber, transactionHash, ts FROM %s WHERE transactionHash = ?",
 		Config.ImmuDBTable,
 	)
 
@@ -125,6 +163,7 @@ func (t *TableOps) QueryRecord(ctx context.Context, transactionHash string) (*Co
 	err := t.DB.QueryRowContext(ctx, queryRecordSQL, transactionHash).Scan(
 		&record.From,
 		&record.To,
+		&record.TxIndex,
 		&record.BlockNumber,
 		&record.TransactionHash,
 		&ts,
@@ -146,7 +185,7 @@ func (t *TableOps) QueryRecord(ctx context.Context, transactionHash string) (*Co
 // Returns a slice of Transfer records as there can be multiple transactions from the same address
 func (t *TableOps) QueryRecordsByFrom(ctx context.Context, fromAddress string) ([]*Config.Transfer, error) {
 	queryRecordsByFromSQL := fmt.Sprintf(
-		"SELECT \"from\", \"to\", blockNumber, transactionHash, ts FROM %s WHERE \"from\" = ?",
+		"SELECT \"from\", \"to\", txIndex, blockNumber, transactionHash, ts FROM %s WHERE \"from\" = ?",
 		Config.ImmuDBTable,
 	)
 
@@ -163,6 +202,7 @@ func (t *TableOps) QueryRecordsByFrom(ctx context.Context, fromAddress string) (
 		err := rows.Scan(
 			&record.From,
 			&record.To,
+			&record.TxIndex,
 			&record.BlockNumber,
 			&record.TransactionHash,
 			&ts,
@@ -185,7 +225,7 @@ func (t *TableOps) QueryRecordsByFrom(ctx context.Context, fromAddress string) (
 // Returns a slice of Transfer records as there can be multiple transactions to the same address
 func (t *TableOps) QueryRecordsByTo(ctx context.Context, toAddress string) ([]*Config.Transfer, error) {
 	queryRecordsByToSQL := fmt.Sprintf(
-		"SELECT \"from\", \"to\", blockNumber, transactionHash, ts FROM %s WHERE \"to\" = ?",
+		"SELECT \"from\", \"to\", txIndex, blockNumber, transactionHash, ts FROM %s WHERE \"to\" = ?",
 		Config.ImmuDBTable,
 	)
 	rows, err := t.DB.QueryContext(ctx, queryRecordsByToSQL, toAddress)
@@ -201,6 +241,7 @@ func (t *TableOps) QueryRecordsByTo(ctx context.Context, toAddress string) ([]*C
 		err := rows.Scan(
 			&record.From,
 			&record.To,
+			&record.TxIndex,
 			&record.BlockNumber,
 			&record.TransactionHash,
 			&ts,
@@ -223,7 +264,7 @@ func (t *TableOps) QueryRecordsByTo(ctx context.Context, toAddress string) ([]*C
 // Returns a slice of Transfer records as there can be multiple transactions at the same block number
 func (t *TableOps) QueryRecordsByBlockNumber(ctx context.Context, blockNumber int) ([]*Config.Transfer, error) {
 	queryRecordsByBlockNumberSQL := fmt.Sprintf(
-		"SELECT \"from\", \"to\", blockNumber, transactionHash, ts FROM %s WHERE blockNumber = ?",
+		"SELECT \"from\", \"to\", txIndex, blockNumber, transactionHash, ts FROM %s WHERE blockNumber = ?",
 		Config.ImmuDBTable,
 	)
 	rows, err := t.DB.QueryContext(ctx, queryRecordsByBlockNumberSQL, blockNumber)
@@ -239,6 +280,7 @@ func (t *TableOps) QueryRecordsByBlockNumber(ctx context.Context, blockNumber in
 		err := rows.Scan(
 			&record.From,
 			&record.To,
+			&record.TxIndex,
 			&record.BlockNumber,
 			&record.TransactionHash,
 			&ts,
@@ -283,4 +325,43 @@ func (t *TableOps) CountRecordsTo(ctx context.Context, toAddress string) (int, e
 		return 0, fmt.Errorf("failed to count records: %w", err)
 	}
 	return count, nil
+}
+
+// Count of all records in the table
+func (t *TableOps) CountAllRecords(ctx context.Context) (int, error) {
+	countRecordsSQL := fmt.Sprintf(
+		"SELECT COUNT(*) FROM %s",
+		Config.ImmuDBTable,
+	)
+	var count int
+	err := t.DB.QueryRowContext(ctx, countRecordsSQL).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count records: %w", err)
+	}
+	return count, nil
+}
+
+// GetTailRecord retrieves the last inserted record (highest ID) for O(1) lookup
+// Since ID is AUTO_INCREMENT, the tail record has the maximum ID
+func (t *TableOps) GetTailRecord(ctx context.Context) (*Config.Transfer, int64, error) {
+	getTailSQL := fmt.Sprintf(
+		"SELECT id FROM %s ORDER BY id DESC LIMIT 1",
+		Config.ImmuDBTable,
+	)
+
+	var record Config.Transfer
+	var id int64
+	var ts time.Time
+	err := t.DB.QueryRowContext(ctx, getTailSQL).Scan(
+		&id,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, 0, nil // No records found
+		}
+		return nil, 0, fmt.Errorf("failed to get tail record: %w", err)
+	}
+
+	record.Timestamp = ts.Unix() // Convert time.Time to Unix timestamp
+	return &record, id, nil
 }
