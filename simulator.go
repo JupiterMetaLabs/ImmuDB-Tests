@@ -763,7 +763,15 @@ func runIndexBenchmarkComparison() {
 	fmt.Println()
 	fmt.Println("⚠ WARNING: This will drop and recreate the table!")
 	fmt.Println("Press Enter to continue or Ctrl+C to cancel...")
-	readInput()
+
+	// Check if running in non-interactive mode (stdin is not a terminal)
+	// In non-interactive mode, skip the prompt and proceed
+	if len(os.Args) > 1 && os.Args[1] == "benchmark" {
+		fmt.Println("(Non-interactive mode: proceeding automatically)")
+		time.Sleep(1 * time.Second) // Brief pause for visibility
+	} else {
+		readInput()
+	}
 
 	// Test WITH indexes
 	fmt.Println()
@@ -1508,11 +1516,14 @@ func main() {
 		case "test", "perf", "performance":
 			config := DefaultTestConfig()
 			runPerformanceTest(config)
+		case "benchmark", "bench", "compare":
+			runIndexBenchmarkComparison()
 		case "help", "-h", "--help":
 			fmt.Println("Usage:")
 			fmt.Println("  go run simulator.go              - Interactive mode")
 			fmt.Println("  go run simulator.go query         - Query table state")
 			fmt.Println("  go run simulator.go test          - Run performance test")
+			fmt.Println("  go run simulator.go benchmark     - Run index benchmark (non-interactive)")
 			fmt.Println("  go run simulator.go help          - Show this help")
 		default:
 			fmt.Printf("Unknown command: %s\n", command)

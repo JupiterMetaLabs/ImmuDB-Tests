@@ -1,0 +1,38 @@
+# ImmutableDB data directory
+data/
+
+# ImmutableDB logs
+immudb.log
+*.log
+
+# ImmutableDB binary
+immudb-v1.10.0-darwin-arm64
+immudb-*
+
+# Benchmark results (optional - uncomment if you don't want to track)
+# benchmark_*.txt
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+

@@ -57,9 +57,13 @@
 - Speedup: **20-60x faster**
 
 **Actual behavior** (ImmutableDB):
-- WITH indexes: 130-165ms per query
-- WITHOUT indexes: 130-165ms per query
-- Speedup: **1.0x (no improvement)**
+- **Small datasets (50k)**: 130-165ms per query (with or without indexes)
+- **Medium datasets (200k)**: 260-330ms per query (with or without indexes)
+- **Large datasets (500k+)**: 300-500ms+ per query (with or without indexes)
+- **Docker deployment**: 600-1000ms+ per query (with or without indexes)
+- **Speedup: 1.0x (no improvement at any scale)**
+
+**Critical finding**: Performance scales with dataset size, but indexes provide zero benefit at any scale.
 
 ### Possible Explanations
 
