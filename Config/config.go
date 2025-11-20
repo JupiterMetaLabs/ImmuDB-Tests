@@ -14,6 +14,7 @@ type Transfer struct {
 	To              string `json:"to"`
 	BlockNumber     int    `json:"blockNumber"`
 	TransactionHash string `json:"transactionHash"`
+	BlockHash       string `json:"blockHash"`
+	TxBlockIndex    int    `json:"txBlockIndex"`
 	Timestamp       int64  `json:"timestamp"`
-	TxIndex         int    `json:"txIndex"`
 }
