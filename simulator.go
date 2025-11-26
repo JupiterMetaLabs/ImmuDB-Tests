@@ -95,6 +95,17 @@ type LatencyStats struct {
 	Durations []time.Duration // Only populated if EnableDetailedStats
 }
 
+func runCompareOrderByTest() {
+    ctx := context.Background()
+    tableOps := immusql.GetTableOps()
+
+    fmt.Println("\n=== Running CompareOrderByIndexTest ===")
+    if err := tableOps.CompareOrderByIndexTest(ctx, Config.ImmuDBTable); err != nil {
+        log.Fatalf("CompareOrderByIndexTest failed: %v", err)
+    }
+    fmt.Println("=== CompareOrderByIndexTest completed ===")
+}
+
 // calculateLatencyStats calculates statistics from a slice of durations
 func calculateLatencyStats(durations []time.Duration, enablePercentiles bool) LatencyStats {
 	if len(durations) == 0 {
@@ -651,11 +662,13 @@ func runBenchmarkTest(config TestConfig, withIndexes bool) BenchmarkResult {
 			log.Fatalf("Failed to create table with indexes: %v", err)
 		}
 	} else {
-		fmt.Println("Creating table WITHOUT indexes...")
-		err := tableOps.CreateTableWithoutIndexes(ctx, Config.ImmuDBTable)
-		if err != nil {
-			log.Fatalf("Failed to create table without indexes: %v", err)
-		}
+		fmt.Println("Index benchmark comparison requires indexes to be created. Exiting.")
+		return BenchmarkResult{}
+		// fmt.Println("Creating table WITHOUT indexes...")
+		// err := tableOps.CreateTableWithoutIndexes(ctx, Config.ImmuDBTable)
+		// if err != nil {
+		// 	log.Fatalf("Failed to create table without indexes: %v", err)
+		// }
 	}
 
 	// Generate transactions
@@ -1343,6 +1356,9 @@ func printMenu() {
 	fmt.Println("  3. Run Performance Test (custom config)")
 	fmt.Println("  4. Run Index Performance Test (realistic workload)")
 	fmt.Println("  5. Benchmark: With Indexes vs Without Indexes")
+	fmt.Println("  7. Run Compare Order By Test for testing Index Performance")
+	fmt.Println("  8. Add Trasnactions to the Table to test")
+	fmt.Println("  9. Print Table Stats")
 	fmt.Println("  6. Exit")
 	fmt.Print("\nEnter choice (1-6): ")
 }
@@ -1498,12 +1514,44 @@ func runInteractiveCLI() {
 		case "6", "q", "quit", "exit":
 			fmt.Println("\nExiting...")
 			return
+		
+		case "7": // new interactive option
+            fmt.Println()
+            runCompareOrderByTest()
+            fmt.Println("\nPress Enter to continue...")
+            readInput()
+
+		case "8":
+			fmt.Println()
+			AddtransactionsToDB()
+			fmt.Println("\nPress Enter to continue...")
+			readInput()
+
+		case "9":
+			fmt.Println()
+			
+			fmt.Println("\nPress Enter to continue...")
+			readInput()
 
 		default:
 			fmt.Printf("\nInvalid choice: %s. Please enter 1-6.\n", choice)
 			time.Sleep(1 * time.Second)
 		}
 	}
+}
+
+func RunStats(){
+	fmt.Println("Printing Table Stats...")
+	ctx := context.Background()
+	tableOps := immusql.GetTableOps()
+	
+	// Get table statistics
+	stats, err := tableOps.GetTableStatistics(ctx)
+	if err != nil {
+		log.Fatalf("Failed to get table statistics: %v", err)
+	}
+	fmt.Println("Table Statistics:")
+	fmt.Println(stats)
 }
 
 func main() {
@@ -1518,6 +1566,8 @@ func main() {
 			runPerformanceTest(config)
 		case "benchmark", "bench", "compare":
 			runIndexBenchmarkComparison()
+		case "compareorderby": // For the non-interactive compare order by test
+            runCompareOrderByTest()
 		case "help", "-h", "--help":
 			fmt.Println("Usage:")
 			fmt.Println("  go run simulator.go              - Interactive mode")
